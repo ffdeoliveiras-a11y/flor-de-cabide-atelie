@@ -1,0 +1,22 @@
+# Dependências (reinstaláveis via npm install)
+node_modules/
+
+# Build do frontend (gerado por `npm run build`)
+frontend/dist/
+
+# Banco de dados — dados reais do negócio, NUNCA sobem pro Git
+backend/flordecabide.db
+backend/flordecabide.db-*
+backend/backups/
+
+# Modelo de idioma do OCR (grande, baixado automaticamente na 1ª leitura de nota escaneada)
+backend/por.traineddata
+
+# Variáveis de ambiente / segredos
+.env
+.env.*
+
+# Sistema operacional / editor
+.DS_Store
+Thumbs.db
+*.log

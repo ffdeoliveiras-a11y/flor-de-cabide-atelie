@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Ícone Flor de Cabide: cabide marrom com flor rosa, sobre fundo creme -->
+  <!-- fundo -->
+  <circle cx="32" cy="32" r="31" fill="#F5F0EB"/>
+  <circle cx="32" cy="32" r="29.5" fill="none" stroke="#E8B4BC" stroke-width="1.6" opacity="0.9"/>
+
+  <!-- cabide -->
+  <g fill="none" stroke="#6B3F2A" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- gancho -->
+    <path d="M32 24.5 V20 a4.6 4.6 0 1 1 4.6 -4.6"/>
+    <!-- corpo -->
+    <path d="M32 24.5 L13.5 38.5 Q10.5 41 14 42.5 H50 Q53.5 41 50.5 38.5 Z"/>
+  </g>
+
+  <!-- folhas -->
+  <g fill="#A9BA8F">
+    <path d="M20.5 24.5 Q14 22.5 12.5 16.5 Q19 17.5 20.9 23.4 Z"/>
+    <path d="M24.5 21 Q25.5 14 31 11.5 Q30.5 18.5 25.4 20.9 Z"/>
+  </g>
+
+  <!-- flor no ombro esquerdo do cabide -->
+  <g transform="translate(22 24.5)">
+    <g fill="#E8B4BC">
+      <ellipse cx="0" cy="-5.6" rx="3.4" ry="5" />
+      <ellipse cx="5.3" cy="-1.7" rx="3.4" ry="5" transform="rotate(72 5.3 -1.7)"/>
+      <ellipse cx="3.3" cy="4.5" rx="3.4" ry="5" transform="rotate(144 3.3 4.5)"/>
+      <ellipse cx="-3.3" cy="4.5" rx="3.4" ry="5" transform="rotate(216 -3.3 4.5)"/>
+      <ellipse cx="-5.3" cy="-1.7" rx="3.4" ry="5" transform="rotate(288 -5.3 -1.7)"/>
+    </g>
+    <circle cx="0" cy="0" r="3.1" fill="#C4838A"/>
+    <circle cx="-0.9" cy="-0.9" r="1" fill="#FDFAF7" opacity="0.75"/>
+  </g>
+
+  <!-- brilhos -->
+  <g fill="#C4838A" opacity="0.8">
+    <circle cx="46" cy="18" r="1.2"/>
+    <circle cx="50.5" cy="24" r="0.8"/>
+    <circle cx="16" cy="47" r="0.9"/>
+  </g>
+</svg>
