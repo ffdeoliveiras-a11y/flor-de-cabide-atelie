@@ -22,8 +22,10 @@ const PORT = process.env.PORT || 5173;
 const JWT_SECRET = process.env.JWT_SECRET || "flor-de-cabide-atelie-secret-key";
 
 app.use(cors());
-// limite maior p/ receber o PDF da nota fiscal em base64
-app.use(express.json({ limit: "20mb" }));
+// limite maior p/ receber o PDF da nota fiscal em base64 — fotos de nota/recibo
+// em alta resolução passam de 20MB no arquivo original, e o base64 soma ~33%
+// a mais (um PDF de 19MB vira ~26MB em base64), por isso 60mb de folga.
+app.use(express.json({ limit: "60mb" }));
 
 // ---------------------------------------------------------------------------
 //  Helpers
