@@ -102,6 +102,20 @@ ensureColumn("sales", "is_revista", "is_revista INTEGER NOT NULL DEFAULT 0");
 // Quantidade de unidades da venda (cost_value/sale_value guardam o TOTAL da
 // linha, não o valor unitário — quantity é só p/ baixa de estoque e exibição)
 ensureColumn("sales", "quantity", "quantity INTEGER NOT NULL DEFAULT 1");
+// Baixa parcial: soma do que a cliente já pagou (cache de sale_payments)
+ensureColumn("sales", "amount_paid", "amount_paid REAL NOT NULL DEFAULT 0");
+
+// Pagamentos recebidos por venda (cliente que paga "picado": 50 + 50)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sale_payments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id    INTEGER NOT NULL REFERENCES sales(id),
+    amount     REAL    NOT NULL DEFAULT 0,
+    paid_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    created_at TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sale_payments_sale ON sale_payments(sale_id);
+`);
 
 // Backfill: data da venda a partir do created_at e flag de fiado legado
 db.exec("UPDATE sales SET sale_date = date(created_at) WHERE sale_date IS NULL");

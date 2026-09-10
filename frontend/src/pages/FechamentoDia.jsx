@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import {
-  brl, cn, marginPct, profitOf, todayISO, addDaysISO, greeting, firstName,
+  brl, cn, marginPct, profitOf, todayISO, addDaysISO, greeting, firstName, saldoDe, isParcial,
 } from "../lib/utils";
 import { EMPRESAS, PAYMENT_METHODS } from "../lib/constants";
 import { useAuth } from "../lib/auth";
@@ -38,6 +38,7 @@ const EMPTY = {
   payment_method: "Pix",
   is_fiado: false,
   due_date: "",
+  entrada: "",
   delivered: false,
   is_revista: false,
 };
@@ -145,9 +146,7 @@ export default function FechamentoDia() {
     const fiadosVencidos = allSales.filter(
       (s) => !s.paid && receiveDate(s) && receiveDate(s) < today
     );
-    const fiadosVencidosTotal = fiadosVencidos.reduce(
-      (a, s) => a + (Number(s.sale_value) || 0), 0
-    );
+    const fiadosVencidosTotal = fiadosVencidos.reduce((a, s) => a + saldoDe(s), 0);
 
     const contasVencidas = bills.filter(
       (b) => !b.paid && b.due_date && b.due_date.slice(0, 10) < today
@@ -184,7 +183,7 @@ export default function FechamentoDia() {
     );
     if (!pendencias.length) return null;
     return {
-      total: pendencias.reduce((a, s) => a + (Number(s.sale_value) || 0), 0),
+      total: pendencias.reduce((a, s) => a + saldoDe(s), 0),
       count: pendencias.length,
     };
   }, [allSales, form.customer_name, editingId]);
@@ -255,6 +254,8 @@ export default function FechamentoDia() {
     // Valor de Custo/Venda no formulário são por UNIDADE — grava o TOTAL da
     // linha (unitário × quantidade); quantity vai separado p/ baixa de estoque.
     const qtd = Math.max(1, parseInt(form.quantity, 10) || 1);
+    // Entrada: parte paga na hora de uma venda no fiado (só ao registrar)
+    const entradaVal = !editingId && form.is_fiado ? Number(form.entrada) || 0 : 0;
     const body = {
       customer_name: form.customer_name.trim(),
       empresa: form.empresa,
@@ -269,7 +270,12 @@ export default function FechamentoDia() {
       sale_date: todayISO(),
       delivered: form.delivered,
       is_revista: form.is_revista,
+      entrada: entradaVal,
     };
+    if (entradaVal > 0 && entradaVal >= body.sale_value) {
+      setError("A entrada é igual ou maior que o total — se ela pagou tudo, desmarque o Fiado.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -318,11 +324,11 @@ export default function FechamentoDia() {
   const lucroDia = sales.reduce((acc, s) => acc + profitOf(s.cost_value, s.sale_value), 0);
   const aEntregar = sales.filter((s) => !s.delivered).length;
   // Valor em R$ (não contagem) — ao lado de "Faturamento", número solto confunde
-  const aReceberValor = sales
-    .filter((s) => !s.paid)
-    .reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
+  const aReceberValor = sales.reduce((a, s) => a + saldoDe(s), 0);
 
   const qtdForm = Math.max(1, parseInt(form.quantity, 10) || 1);
+  const totalVenda = (Number(form.sale_value) || 0) * qtdForm;
+  const entradaForm = Number(form.entrada) || 0;
   const lucroUnit = profitOf(form.cost_value, form.sale_value);
   const lucro = lucroUnit * qtdForm; // total da linha (unitário × quantidade)
   const margem = marginPct(form.cost_value, form.sale_value); // é uma razão, não muda com qtd
@@ -583,14 +589,37 @@ export default function FechamentoDia() {
             </div>
 
             {form.is_fiado && (
-              <div className="mt-3 space-y-1.5">
-                <Label>Data de Vencimento</Label>
-                <Input
-                  type="date"
-                  value={form.due_date}
-                  onChange={(e) => set("due_date", e.target.value)}
-                  className="w-48"
-                />
+              <div className="mt-3 flex flex-wrap items-end gap-3">
+                <div className="space-y-1.5">
+                  <Label>Data de Vencimento</Label>
+                  <Input
+                    type="date"
+                    value={form.due_date}
+                    onChange={(e) => set("due_date", e.target.value)}
+                    className="w-48"
+                  />
+                </div>
+                {!editingId && (
+                  <div className="space-y-1.5">
+                    <Label>Entrada — já pagou agora (R$)</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      value={form.entrada || ""}
+                      onChange={(e) => set("entrada", e.target.value)}
+                      placeholder="Opcional"
+                      className="w-48"
+                    />
+                  </div>
+                )}
+                {!editingId && entradaForm > 0 && totalVenda > entradaForm && (
+                  <p className="pb-2 text-sm text-brand-text/60">
+                    Fica faltando{" "}
+                    <strong className="text-amber-600">{brl(totalVenda - entradaForm)}</strong>
+                  </p>
+                )}
               </div>
             )}
 
@@ -661,8 +690,9 @@ export default function FechamentoDia() {
                     <TableCell>{s.empresa || s.brand || "—"}</TableCell>
                     <TableCell>
                       {s.is_fiado ? (
-                        <Badge variant={s.paid ? "success" : "danger"}>
-                          Fiado {s.paid ? "· pago" : "· em aberto"}
+                        <Badge variant={s.paid ? "success" : isParcial(s) ? "warning" : "danger"}>
+                          Fiado{" "}
+                          {s.paid ? "· pago" : isParcial(s) ? `· falta ${brl(saldoDe(s))}` : "· em aberto"}
                         </Badge>
                       ) : (
                         <Badge variant="neutral">{s.payment_method}</Badge>

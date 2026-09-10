@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Pencil, Trash2, Filter, X, PackageCheck, Package, History, SearchX, Download,
+  Pencil, Trash2, Filter, X, PackageCheck, Package, History, SearchX, Download, Wallet,
 } from "lucide-react";
 import { api } from "../lib/api";
-import { brl, cn, formatDate, marginPct, profitOf, todayISO } from "../lib/utils";
+import {
+  brl, cn, formatDate, marginPct, profitOf, todayISO, recebidoDe, saldoDe, isParcial,
+} from "../lib/utils";
+import { ReceberModal } from "../components/ReceberModal";
 import { EMPRESAS, PAYMENT_METHODS } from "../lib/constants";
 import { useToast, useConfirm } from "../lib/feedback";
 import { usePersistentState } from "../lib/usePersistentState";
@@ -39,11 +42,13 @@ const EMPTY_FILTERS = {
 function statusOf(s) {
   if (s.paid) return "PAGO";
   if (s.is_fiado && s.due_date && s.due_date.slice(0, 10) < todayISO()) return "ATRASADO";
+  if (isParcial(s)) return "PARCIAL";
   return "PENDENTE";
 }
 
 function statusVariant(status) {
   if (status === "ATRASADO") return "danger";
+  if (status === "PARCIAL") return "warning";
   if (status === "PENDENTE") return "default";
   return "success";
 }
@@ -86,6 +91,8 @@ export default function Historico() {
   const [error, setError] = useState("");
   // Paginação simples: mostra 50 e vai carregando mais (totais sempre do conjunto todo)
   const [limit, setLimit] = useState(PAGE_SIZE);
+  // Venda aberta na janela "Receber" (pagamento total ou parcial)
+  const [receber, setReceber] = useState(null);
 
   function setF(field, value) {
     setFilters((f) => ({ ...f, [field]: value }));
@@ -137,7 +144,8 @@ export default function Historico() {
   const totals = useMemo(() => {
     const faturamento = filtered.reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
     const lucro = filtered.reduce((a, s) => a + profitOf(s.cost_value, s.sale_value), 0);
-    return { faturamento, lucro, margem: faturamento > 0 ? (lucro / faturamento) * 100 : 0 };
+    const aReceber = filtered.reduce((a, s) => a + saldoDe(s), 0);
+    return { faturamento, lucro, aReceber, margem: faturamento > 0 ? (lucro / faturamento) * 100 : 0 };
   }, [filtered]);
 
   function openEdit(s) {
@@ -208,7 +216,8 @@ export default function Historico() {
     const txt = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const header = [
       "Data", "Cliente", "Produto", "Quantidade", "Empresa", "Pagamento", "Tipo",
-      "Custo", "Venda", "Lucro", "Status", "Entregue", "Vencimento", "Observações",
+      "Custo", "Venda", "Lucro", "Recebido", "Falta receber", "Status", "Entregue",
+      "Vencimento", "Observações",
     ];
     const rows = filtered.map((s) => [
       formatDate(s.sale_date),
@@ -221,6 +230,8 @@ export default function Historico() {
       num(s.cost_value),
       num(s.sale_value),
       num(profitOf(s.cost_value, s.sale_value)),
+      num(recebidoDe(s)),
+      num(saldoDe(s)),
       statusOf(s),
       s.delivered ? "Sim" : "Não",
       s.due_date ? formatDate(s.due_date) : "",
@@ -292,6 +303,7 @@ export default function Historico() {
                 <option>Todos</option>
                 <option>PAGO</option>
                 <option>PENDENTE</option>
+                <option>PARCIAL</option>
                 <option>ATRASADO</option>
               </Select>
             </div>
@@ -325,6 +337,11 @@ export default function Historico() {
             <span className="text-brand-text/60">
               Lucro <strong className="text-emerald-600">{brl(totals.lucro)}</strong>
             </span>
+            {totals.aReceber > 0 && (
+              <span className="text-brand-text/60">
+                Falta receber <strong className="text-amber-600">{brl(totals.aReceber)}</strong>
+              </span>
+            )}
             <span className="text-brand-text/60">
               Margem <strong className="text-brand-brown">{totals.margem.toFixed(1)}%</strong>
             </span>
@@ -402,7 +419,14 @@ export default function Historico() {
                             {s.is_fiado ? `Fiado` : s.payment_method}
                           </Badge>
                         </Td>
-                        <Td right className="font-semibold text-brand-brown whitespace-nowrap">{brl(s.sale_value)}</Td>
+                        <Td right className="font-semibold text-brand-brown whitespace-nowrap">
+                          {brl(s.sale_value)}
+                          {isParcial(s) && (
+                            <div className="text-[10px] font-normal text-amber-700">
+                              falta {brl(saldoDe(s))}
+                            </div>
+                          )}
+                        </Td>
                         <Td right className="text-emerald-600 whitespace-nowrap">
                           {brl(profitOf(s.cost_value, s.sale_value))}
                         </Td>
@@ -428,6 +452,17 @@ export default function Historico() {
                         </Td>
                         <Td right>
                           <div className="flex justify-end gap-0.5">
+                            {!s.paid && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-emerald-600 hover:bg-emerald-50"
+                                onClick={() => setReceber(s)}
+                                title="Receber pagamento (total ou parcial)"
+                              >
+                                <Wallet className="h-3 w-3" />
+                              </Button>
+                            )}
                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(s)}>
                               <Pencil className="h-3 w-3" />
                             </Button>
@@ -462,6 +497,9 @@ export default function Historico() {
           )}
         </CardContent>
       </Card>
+
+      {/* Receber pagamento (total ou parcial) */}
+      <ReceberModal sale={receber} onClose={() => setReceber(null)} onChanged={load} />
 
       {/* Modal de edição */}
       <Modal
@@ -521,6 +559,11 @@ export default function Historico() {
                   <option value="PAGO">PAGO</option>
                   <option value="PENDENTE">PENDENTE</option>
                 </Select>
+                {editing && isParcial(editing) && editForm.status !== "PAGO" && (
+                  <p className="text-[11px] text-amber-700">
+                    Já pagou {brl(editing.amount_paid)} — fica PARCIAL enquanto faltar valor.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Data de entrega</Label>

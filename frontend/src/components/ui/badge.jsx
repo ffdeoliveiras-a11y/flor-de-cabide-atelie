@@ -10,6 +10,7 @@ const badgeVariants = cva(
         default: "bg-brand-pink/40 text-brand-brown",
         success: "bg-emerald-100 text-emerald-700",
         danger: "bg-red-100 text-red-600",
+        warning: "bg-amber-100 text-amber-700",
         neutral: "bg-brand-cream text-brand-text/70",
       },
     },

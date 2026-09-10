@@ -21,7 +21,7 @@ import {
   TrendingDown, Landmark, Percent, PiggyBank, Coins, Layers,
 } from "lucide-react";
 import { api } from "../lib/api";
-import { brl, formatDate, profitOf, todayISO } from "../lib/utils";
+import { brl, formatDate, profitOf, todayISO, recebidoDe, saldoDe } from "../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -111,12 +111,9 @@ export default function Dashboard() {
   // "o que já entrou"). "A Receber" (vendas ainda não pagas/fiado) NÃO entra
   // nessa conta — esse dinheiro só vira caixa quando a cliente efetivamente pagar.
   const patrimonio = useMemo(() => {
-    const recebido = sales
-      .filter((s) => s.paid)
-      .reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
-    const aReceber = sales
-      .filter((s) => !s.paid)
-      .reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
+    // Pagamento parcial: a parte já paga entra em Recebido; só o que falta fica em A Receber
+    const recebido = sales.reduce((a, s) => a + recebidoDe(s), 0);
+    const aReceber = sales.reduce((a, s) => a + saldoDe(s), 0);
     const caixa = recebido; // Caixa = Recebido
     const estoqueValor = products.reduce(
       (a, p) => a + (Number(p.cost_value) || 0) * (Number(p.quantity) || 0),
@@ -231,10 +228,8 @@ export default function Dashboard() {
     const totalFat = filtered.reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
     const totalLucro = filtered.reduce((a, s) => a + profitOf(s.cost_value, s.sale_value), 0);
     const totalCusto = filtered.reduce((a, s) => a + (Number(s.cost_value) || 0), 0);
-    const recebido = filtered
-      .filter((s) => s.paid)
-      .reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
-    const pendente = periodReceivables.reduce((a, s) => a + (Number(s.sale_value) || 0), 0);
+    const recebido = filtered.reduce((a, s) => a + recebidoDe(s), 0);
+    const pendente = periodReceivables.reduce((a, s) => a + saldoDe(s), 0);
     const ticket = filtered.length > 0 ? totalFat / filtered.length : 0;
 
     // Só as NÃO pagas — senão soma boleto já pago junto com o que ainda falta

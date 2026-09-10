@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { brl, formatDate, todayISO, firstName } from "../lib/utils";
+import { brl, cn, formatDate, todayISO, firstName, recebidoDe, saldoDe, isParcial } from "../lib/utils";
+import { ReceberModal } from "../components/ReceberModal";
 import {
   TrendingUp,
   Wallet,
@@ -83,6 +84,9 @@ export default function PainelFinanceiro() {
   // o que já foi pago (as pagas ficam escondidas, mas dá pra reexibir).
   const [verPagas, setVerPagas] = usePersistentState("fc_fin_ver_pagas", false);
 
+  // Venda aberta na janela "Receber" (pagamento parcial)
+  const [receber, setReceber] = useState(null);
+
   async function loadAll() {
     try {
       const [salesData, billsData] = await Promise.all([
@@ -161,15 +165,16 @@ export default function PainelFinanceiro() {
   const kpis = useMemo(() => {
     let faturamento = 0,
       recebido = 0;
+    // Pagamento parcial: o que já entrou conta em Recebido e só o que falta
+    // conta em A Receber (venda de 100 com 50 pagos = 50 + 50).
     for (const s of periodSales) {
-      const v = Number(s.sale_value) || 0;
-      faturamento += v;
-      if (s.paid) recebido += v;
+      faturamento += Number(s.sale_value) || 0;
+      recebido += recebidoDe(s);
     }
     let pendente = 0,
       emAtraso = 0;
     for (const s of periodReceivables) {
-      const v = Number(s.sale_value) || 0;
+      const v = saldoDe(s);
       pendente += v;
       if (isOverdue(expectedReceiveDate(s))) emAtraso += v;
     }
@@ -224,6 +229,46 @@ export default function PainelFinanceiro() {
     await api.patch(`/sales/${id}/baixa`);
     await loadAll();
     toast.success(`Pagamento de ${firstName(nome)} recebido! 💰`);
+  }
+
+  function situacaoBadge(s, venc) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {isOverdue(venc) ? (
+          <Badge variant="danger">Atrasado</Badge>
+        ) : venc && venc.slice(0, 10) === today ? (
+          <Badge variant="default">Vence hoje</Badge>
+        ) : s.is_fiado ? (
+          <Badge variant="success">No prazo</Badge>
+        ) : (
+          <Badge variant="default">Pendente</Badge>
+        )}
+        {isParcial(s) && <Badge variant="warning">Parcial</Badge>}
+      </span>
+    );
+  }
+
+  function acoesReceber(s) {
+    return (
+      <div className="flex justify-end gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setReceber(s)}
+          title="Registrar um pagamento parcial (cliente pagou só uma parte)"
+        >
+          Parcial
+        </Button>
+        <Button
+          size="sm"
+          variant="success"
+          onClick={() => darBaixa(s.id, s.customer_name)}
+          title="Cliente pagou tudo o que faltava"
+        >
+          Recebi tudo 💰
+        </Button>
+      </div>
+    );
   }
 
   async function marcarPago(id) {
@@ -448,57 +493,92 @@ export default function PainelFinanceiro() {
             <EmptyState
               icon={PartyPopper}
               title="Tudo recebido! 🎉"
-              hint="Nenhum pagamento pendente no período. Quando uma venda no fiado ou pendente aparecer aqui, clique em “Recebi” quando a cliente pagar."
+              hint="Nenhum pagamento pendente no período. Quando uma venda no fiado ou pendente aparecer aqui, clique em “Recebi tudo” quando a cliente pagar — ou em “Parcial” se ela pagar só uma parte."
             />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Produto</TableHead>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                  <TableHead>Vencimento</TableHead>
-                  <TableHead>Situação</TableHead>
-                  <TableHead className="text-right">Ação</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Celular: cartões (tabela de 7 colunas não cabe na tela) */}
+              <div className="space-y-2 md:hidden">
                 {pendentes.map((s) => {
                   const venc = s.due_date || s.payment_date;
+                  const empresa = s.empresa || s.brand;
                   return (
-                    <TableRow key={s.id} className={isOverdue(venc) ? "bg-red-50/40" : ""}>
-                      <TableCell className="font-medium">{s.customer_name}</TableCell>
-                      <TableCell>{s.product || "—"}</TableCell>
-                      <TableCell>{s.empresa || s.brand || "—"}</TableCell>
-                      <TableCell className="text-right font-semibold">{brl(s.sale_value)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{formatDate(venc)}</TableCell>
-                      <TableCell>
-                        {isOverdue(venc) ? (
-                          <Badge variant="danger">Atrasado</Badge>
-                        ) : venc && venc.slice(0, 10) === today ? (
-                          <Badge variant="default">Vence hoje</Badge>
-                        ) : s.is_fiado ? (
-                          <Badge variant="success">No prazo</Badge>
-                        ) : (
-                          <Badge variant="default">Pendente</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="success"
-                          onClick={() => darBaixa(s.id, s.customer_name)}
-                          title="Marcar como recebido"
-                        >
-                          Recebi 💰
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                    <div
+                      key={s.id}
+                      className={cn(
+                        "rounded-xl border p-3",
+                        isOverdue(venc) ? "border-red-200 bg-red-50/40" : "border-brand-pink/40"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-brand-text">{s.customer_name}</p>
+                          <p className="truncate text-xs text-brand-text/60">
+                            {s.product || "—"}
+                            {empresa ? ` · ${empresa}` : ""}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-bold text-brand-brown">{brl(saldoDe(s))}</p>
+                          {isParcial(s) && (
+                            <p className="text-[11px] text-brand-text/50">
+                              pagou {brl(s.amount_paid)} de {brl(s.sale_value)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-xs text-brand-text/60">
+                          <span className="whitespace-nowrap">{formatDate(venc)}</span>
+                          {situacaoBadge(s, venc)}
+                        </div>
+                        {acoesReceber(s)}
+                      </div>
+                    </div>
                   );
                 })}
-              </TableBody>
-            </Table>
+              </div>
+
+              {/* Computador: tabela */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Produto</TableHead>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead className="text-right">Falta receber</TableHead>
+                      <TableHead>Vencimento</TableHead>
+                      <TableHead>Situação</TableHead>
+                      <TableHead className="text-right">Ação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendentes.map((s) => {
+                      const venc = s.due_date || s.payment_date;
+                      return (
+                        <TableRow key={s.id} className={isOverdue(venc) ? "bg-red-50/40" : ""}>
+                          <TableCell className="font-medium">{s.customer_name}</TableCell>
+                          <TableCell>{s.product || "—"}</TableCell>
+                          <TableCell>{s.empresa || s.brand || "—"}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="font-semibold">{brl(saldoDe(s))}</div>
+                            {isParcial(s) && (
+                              <div className="whitespace-nowrap text-[11px] text-brand-text/50">
+                                pagou {brl(s.amount_paid)} de {brl(s.sale_value)}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">{formatDate(venc)}</TableCell>
+                          <TableCell>{situacaoBadge(s, venc)}</TableCell>
+                          <TableCell className="text-right">{acoesReceber(s)}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -644,6 +724,9 @@ export default function PainelFinanceiro() {
           )}
         </CardContent>
       </Card>
+
+      {/* Receber pagamento (total ou parcial) */}
+      <ReceberModal sale={receber} onClose={() => setReceber(null)} onChanged={loadAll} />
 
       {/* Modal de edição de conta a pagar */}
       <Modal

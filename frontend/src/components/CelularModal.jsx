@@ -87,10 +87,26 @@ export function CelularModal({ open, onClose }) {
             </li>
           </ol>
 
-          <p className="rounded-xl bg-brand-cream/60 px-4 py-2.5 text-xs text-brand-text/60">
-            💡 O computador precisa estar <strong>ligado</strong> para o celular acessar. Se
-            um dia parar de funcionar, abra esta janela de novo — o endereço pode mudar.
-          </p>
+          <div className="space-y-1.5 rounded-xl bg-brand-cream/60 px-4 py-2.5 text-xs text-brand-text/70">
+            <p>
+              💡 O computador precisa estar <strong>ligado</strong> para o celular acessar.
+            </p>
+            <p className="font-semibold text-brand-brown">Não abriu no celular?</p>
+            <ul className="list-disc space-y-0.5 pl-4">
+              <li>
+                <strong>Desligue os dados móveis (4G)</strong> e confira se o celular está no
+                mesmo Wi-Fi do computador — pela internet de fora de casa não funciona.
+              </li>
+              <li>
+                Abra esta janela de novo e leia o código outra vez — o endereço pode mudar
+                quando o roteador reinicia.
+              </li>
+              <li>
+                Se usa o ícone na tela inicial, apague o ícone antigo e adicione de novo com o
+                endereço acima.
+              </li>
+            </ul>
+          </div>
         </div>
       )}
     </Modal>

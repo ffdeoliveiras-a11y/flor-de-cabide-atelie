@@ -30,6 +30,22 @@ export function marginPct(cost, sale) {
   return s > 0 ? (profitOf(cost, sale) / s) * 100 : 0;
 }
 
+// Baixa parcial: quanto de uma venda já entrou e quanto ainda falta receber.
+// Venda marcada como paga conta inteira como recebida (inclui vendas antigas,
+// quitadas antes de existir o registro de pagamentos).
+export function recebidoDe(s) {
+  const total = Number(s.sale_value) || 0;
+  if (s.paid) return total;
+  return Math.min(total, Number(s.amount_paid) || 0);
+}
+export function saldoDe(s) {
+  if (s.paid) return 0;
+  return Math.max(0, (Number(s.sale_value) || 0) - (Number(s.amount_paid) || 0));
+}
+export function isParcial(s) {
+  return !s.paid && (Number(s.amount_paid) || 0) > 0;
+}
+
 // Data de hoje no formato YYYY-MM-DD (horário local)
 export function todayISO() {
   const now = new Date();

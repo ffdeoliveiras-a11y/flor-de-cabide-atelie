@@ -54,7 +54,9 @@ de datas digitadas com erro. Clientes novos são criados automaticamente.
 | POST | `/auth/register` · `/auth/login` | Cadastro / login |
 | GET·POST | `/sales` | Listar (`?date=today` ou `?date=YYYY-MM-DD`) / criar vendas |
 | PATCH·DELETE | `/sales/:id` | Editar / excluir venda |
-| PATCH | `/sales/:id/baixa` | Dar baixa no fiado |
+| PATCH | `/sales/:id/baixa` | Receber pagamento — sem corpo quita o que falta; `{ amount, date }` registra baixa parcial |
+| GET | `/sales/:id/pagamentos` | Pagamentos já recebidos da venda |
+| DELETE | `/sales/:id/pagamentos/:pid` | Desfazer um pagamento lançado errado |
 | GET | `/sales/summary` | Resumo financeiro do mês |
 | GET·POST·PATCH·DELETE | `/products` | Estoque (busca `?q=`, criar, editar, excluir) |
 | GET·POST | `/customers` | Listar/buscar (`?q=`) / criar clientes |

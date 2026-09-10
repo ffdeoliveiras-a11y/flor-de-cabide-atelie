@@ -288,6 +288,56 @@ app.post("/products/import", authRequired, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+//  Pagamentos da venda (baixa parcial — cliente que paga "picado")
+// ---------------------------------------------------------------------------
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const brlTxt = (n) => `R$ ${round2(n).toFixed(2).replace(".", ",")}`;
+
+// Recalcula amount_paid pela soma de sale_payments e acerta paid/status:
+// pagou tudo → PAGO; pagou uma parte → PARCIAL; nada → PENDENTE.
+function refreshSalePayment(saleId) {
+  const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(saleId);
+  if (!sale) return null;
+  const { total } = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?")
+    .get(saleId);
+  const pago = round2(total);
+  if (pago > 0 && pago >= round2(sale.sale_value)) {
+    db.prepare(
+      `UPDATE sales SET amount_paid = ?, paid = 1, status = 'PAGO',
+         paid_at = COALESCE(paid_at, datetime('now','localtime')) WHERE id = ?`
+    ).run(pago, saleId);
+  } else {
+    db.prepare(
+      "UPDATE sales SET amount_paid = ?, paid = 0, status = ?, paid_at = NULL WHERE id = ?"
+    ).run(pago, pago > 0 ? "PARCIAL" : "PENDENTE", saleId);
+  }
+  return db.prepare("SELECT * FROM sales WHERE id = ?").get(saleId);
+}
+
+// Depois de editar a venda: status coerente com o que já foi pago (ex.: venda
+// em aberto com parte paga vira PARCIAL; se o novo valor já está coberto, PAGO).
+function normalizeSaleStatus(saleId) {
+  const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(saleId);
+  if (!sale) return;
+  const st = String(sale.status || "").toUpperCase();
+  if (!["PAGO", "PENDENTE", "PARCIAL", ""].includes(st)) return; // status importado diferente
+  if (sale.paid) {
+    if (st !== "PAGO") db.prepare("UPDATE sales SET status = 'PAGO' WHERE id = ?").run(saleId);
+    return;
+  }
+  const pago = round2(sale.amount_paid);
+  if (pago > 0 && pago >= round2(sale.sale_value)) {
+    db.prepare(
+      `UPDATE sales SET paid = 1, status = 'PAGO',
+         paid_at = COALESCE(paid_at, datetime('now','localtime')) WHERE id = ?`
+    ).run(saleId);
+  } else {
+    db.prepare("UPDATE sales SET status = ? WHERE id = ?").run(pago > 0 ? "PARCIAL" : "PENDENTE", saleId);
+  }
+}
+
+// ---------------------------------------------------------------------------
 //  SALES
 // ---------------------------------------------------------------------------
 // GET /sales                 -> todas as vendas
@@ -327,6 +377,7 @@ app.post("/sales", authRequired, (req, res) => {
     delivered,
     is_revista,
     quantity,
+    entrada,
   } = req.body || {};
 
   if (!customer_name || !payment_method)
@@ -379,6 +430,16 @@ app.post("/sales", authRequired, (req, res) => {
     db.prepare("UPDATE products SET quantity = MAX(0, quantity - ?) WHERE id = ?").run(qty, product_id);
   }
 
+  // Entrada: parte que a cliente já pagou na hora de uma venda em aberto
+  const entradaVal = round2(entrada);
+  if (!paid && entradaVal > 0) {
+    db.prepare("INSERT INTO sale_payments (sale_id, amount) VALUES (?, ?)").run(
+      info.lastInsertRowid,
+      Math.min(entradaVal, round2(sale_value))
+    );
+    refreshSalePayment(info.lastInsertRowid);
+  }
+
   res.status(201).json(db.prepare("SELECT * FROM sales WHERE id = ?").get(info.lastInsertRowid));
 });
 
@@ -416,7 +477,7 @@ app.patch("/sales/:id", authRequired, (req, res) => {
   if (status) {
     finalStatus = status;
     paid = String(status).toUpperCase() === "PAGO" ? 1 : 0;
-  } else if (!fiado) {
+  } else if (!fiado && !(existing.amount_paid > 0)) {
     finalStatus = "PAGO";
     paid = 1;
   } else {
@@ -457,6 +518,7 @@ app.patch("/sales/:id", authRequired, (req, res) => {
     quantity !== undefined ? Math.max(1, parseInt(quantity, 10) || 1) : existing.quantity,
     req.params.id
   );
+  normalizeSaleStatus(req.params.id);
 
   res.json(db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id));
 });
@@ -470,6 +532,7 @@ app.delete("/sales/:id", authRequired, (req, res) => {
     const qty = Math.max(1, sale.quantity || 1);
     db.prepare("UPDATE products SET quantity = quantity + ? WHERE id = ?").run(qty, sale.product_id);
   }
+  db.prepare("DELETE FROM sale_payments WHERE sale_id = ?").run(req.params.id);
   db.prepare("DELETE FROM sales WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
@@ -482,15 +545,55 @@ app.patch("/sales/:id/entrega", authRequired, (req, res) => {
   res.json(db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id));
 });
 
-// Dar baixa no fiado (marca como recebido)
+// Dar baixa (recebimento) — total ou PARCIAL.
+// body { amount?, date? }: sem amount recebe tudo o que falta; com amount
+// registra só essa parte (ex.: venda de 100, pagou 50 agora e 50 depois).
 app.patch("/sales/:id/baixa", authRequired, (req, res) => {
   const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id);
   if (!sale) return res.status(404).json({ error: "Venda não encontrada" });
+  if (sale.paid) return res.json(sale); // já quitada
 
+  const { amount, date } = req.body || {};
+  const falta = round2(Math.max(0, sale.sale_value - (sale.amount_paid || 0)));
+  const valor = amount === undefined || amount === null || amount === "" ? falta : round2(amount);
+
+  if (falta <= 0) {
+    // venda sem valor (ou já coberta): só marca como paga
+    db.prepare(
+      `UPDATE sales SET paid = 1, status = 'PAGO', paid_at = datetime('now','localtime') WHERE id = ?`
+    ).run(req.params.id);
+    return res.json(db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id));
+  }
+  if (!(valor > 0)) return res.status(400).json({ error: "Informe um valor maior que zero." });
+  if (valor > falta)
+    return res.status(400).json({ error: `O valor é maior do que falta pagar (${brlTxt(falta)}).` });
+
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : null;
   db.prepare(
-    `UPDATE sales SET paid = 1, status = 'PAGO', paid_at = datetime('now','localtime') WHERE id = ?`
-  ).run(req.params.id);
-  res.json(db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id));
+    `INSERT INTO sale_payments (sale_id, amount, paid_at)
+     VALUES (?, ?, COALESCE(? || ' ' || time('now','localtime'), datetime('now','localtime')))`
+  ).run(req.params.id, valor, dia);
+  res.json(refreshSalePayment(req.params.id));
+});
+
+// Pagamentos já recebidos de uma venda
+app.get("/sales/:id/pagamentos", authRequired, (req, res) => {
+  res.json(
+    db
+      .prepare("SELECT * FROM sale_payments WHERE sale_id = ? ORDER BY paid_at ASC, id ASC")
+      .all(req.params.id)
+  );
+});
+
+// Desfazer um pagamento lançado errado
+app.delete("/sales/:id/pagamentos/:pid", authRequired, (req, res) => {
+  db.prepare("DELETE FROM sale_payments WHERE id = ? AND sale_id = ?").run(
+    req.params.pid,
+    req.params.id
+  );
+  const sale = refreshSalePayment(req.params.id);
+  if (!sale) return res.status(404).json({ error: "Venda não encontrada" });
+  res.json(sale);
 });
 
 // Resumo financeiro do mês atual
@@ -525,7 +628,7 @@ app.get("/sales/summary", authRequired, (req, res) => {
   // Inadimplência — fiados vencidos e ainda não pagos
   const defaultRow = db
     .prepare(
-      `SELECT COALESCE(SUM(sale_value), 0) AS total
+      `SELECT COALESCE(SUM(sale_value - COALESCE(amount_paid, 0)), 0) AS total
          FROM sales
         WHERE is_fiado = 1
           AND paid = 0
@@ -622,9 +725,26 @@ app.get("/api/lan-address", authRequired, (_req, res) => {
 });
 
 const DIST = path.join(__dirname, "..", "frontend", "dist");
-app.use(express.static(DIST));
+app.use(
+  express.static(DIST, {
+    setHeaders(res, filePath) {
+      // index.html/manifest sempre revalidados: o "app" salvo na tela inicial do
+      // celular não fica preso numa versão antiga (tela branca após atualizar).
+      if (/index\.html$|manifest\.json$/.test(filePath)) res.setHeader("Cache-Control", "no-cache");
+      // arquivos de build têm hash no nome → podem ficar em cache para sempre
+      else if (filePath.includes(`${path.sep}assets${path.sep}`))
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    },
+  })
+);
+// Arquivo de build que não existe mais (versão antiga) → 404 de verdade,
+// e não o index.html disfarçado de JavaScript.
+app.get("/assets/*", (_req, res) => res.status(404).end());
 // Qualquer rota que não seja da API devolve o app (SPA / React Router)
-app.get("*", (_req, res) => res.sendFile(path.join(DIST, "index.html")));
+app.get("*", (_req, res) => {
+  res.setHeader("Cache-Control", "no-cache");
+  res.sendFile(path.join(DIST, "index.html"));
+});
 
 // ---------------------------------------------------------------------------
 //  Backup automático do banco — uma cópia por dia em backend/backups,
